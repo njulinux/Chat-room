@@ -9,7 +9,7 @@
 
 int sockfd;
 char *IP = "127.0.0.1"; //IP地址
-short PORT = 8000;  //端口号
+short PORT = 8282;  //端口号
 typedef struct sockaddr SA;
 char name[30]; //存储昵称
 
@@ -39,7 +39,9 @@ void work() //客户端工作函数
 	while (1) 
 	{
 		char buf[100] = { }; //存放聊天内容
-		scanf("%s", buf);
+		//scanf("%s", buf);
+		fgets(buf, 100, stdin);
+ 	   	printf("the sent message is: %s", buf);
 		char msg[131] = { };
 		sprintf(msg, "%s:%s", name, buf);
 		send(sockfd, msg, strlen(msg), 0); //聊天信息发送至服务器端
