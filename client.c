@@ -9,9 +9,10 @@
 
 int sockfd;
 char *IP = "127.0.0.1"; //IP地址
-short PORT = 8282;  //端口号
+short PORT = 8000;  //端口号
 typedef struct sockaddr SA;
 char name[30]; //存储昵称
+char password[30]; //存储用户密码
 
 void init() //客户端初始化函数
 {
@@ -28,6 +29,80 @@ void init() //客户端初始化函数
 	printf("客户端初始化成功\n");
 }
 
+int signin(char *name) //客户端登录&注册函数，返回登录结果
+{
+	int i = 1;
+	char k[3] = "unk";
+	char get1[3] = {}, get2[3] = {};
+	send(sockfd, name, strlen(name), 0);
+	recv(sockfd, get1, sizeof(get1), 0);
+	if (strcmp(get1, "yes") == 0) //判定名称注册过
+	{
+		printf("This name have been used.\nAre you new here(please enter yes/no)?");
+		scanf("%s", k);
+		while (strcmp(k, "yes") !=0 && strcmp(k, "no") != 0)
+		{
+			printf("please enter [yes/no]:\n");
+			scanf("%s", k);
+		}
+		if (strcmp(k, "yes") == 0) //判断为新用户，重新输入名称，并重新运行函数
+		{
+			printf("You are new here, please enter another name:");
+			scanf("%s", name);
+			send(sockfd, "restart", sizeof("restart"), 0); //向服务端发送从头判定的命令
+			return signin(name);
+		}
+		else if (strcmp(k, "no") == 0) //判断为老用户，给予3次输入密码机会
+		{
+			printf("Please enter your password( you have tried 0/3 times):\n");
+			scanf("%s", password);
+			send(sockfd, password, strlen(password), 0);
+			recv(sockfd, get2, sizeof(get2), 0);
+			while(i < 3 && strcmp(get2, "no") == 0)
+			{
+				printf("password error\n");
+				printf("please enter again(you have tried %d/3 times):\n", i);
+				scanf("%s", password);
+				send(sockfd, password, strlen(password), 0);
+				recv(sockfd, get2, sizeof(get2), 0);
+				i++;
+			}
+			if (i < 2 || strcmp(get2, "yes") == 0)
+				return 0;
+			else
+				return -1;
+		}
+	}
+	else if (strcmp(get1, "no") == 0) //判断名称未注册，首次登录视作注册
+	{
+		printf("You are new user,\nplease enter your password(please don't use restart as password):\n"); //防止restart造成服务端误判定，见上判定为新用户
+		scanf("%s", password);
+		while (strcmp(password, "restart") == 0)
+			{
+				printf("Don't use restart as password,and enter another password:");
+				scanf("%s", password);
+			}
+		send(sockfd, password, strlen(password), 0);
+		return 0;
+	}
+	else if(strcmp(get1, "usd") == 0) //判断聊天室中有人使用该名称，重新输入名字，并重新运行函数
+	{
+		printf("This username have been using,\nplease enter another:\n");
+		scanf("%s", name);
+		return signin(name);
+	}
+}
+
+void enter(char *buf) //完善空格输入问题
+{
+	char buf1[100] = {};
+	int i = 0;
+	fgets(buf1, 100, stdin);
+	for (i = 0; buf1[i] != 0; i++)
+		buf[i] = buf1[i];
+	buf[i - 1] = '\0';
+}
+
 void work() //客户端工作函数
 {
 	pthread_t id;
@@ -39,9 +114,7 @@ void work() //客户端工作函数
 	while (1) 
 	{
 		char buf[100] = { }; //存放聊天内容
-		//scanf("%s", buf);
-		fgets(buf, 100, stdin);
- 	   	printf("the sent message is: %s", buf);
+		enter(buf);
 		char msg[131] = { };
 		sprintf(msg, "%s:%s", name, buf);
 		send(sockfd, msg, strlen(msg), 0); //聊天信息发送至服务器端
@@ -75,6 +148,10 @@ void work() //客户端工作函数
 	init();
 	printf("please input your name: ");
 	scanf("%s", name);
-	work();
+	int check = signin(name);
+	if (check == 0) //判断登录&注册成功
+		work();
+	else //判断登录失败
+		printf("login failed,app end\n");
 	return 0;
 }
