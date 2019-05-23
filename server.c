@@ -13,7 +13,8 @@ int size = 100;
 char *IP = "127.0.0.1"; //IP地址
 short PORT = 8282;     //端口号
 typedef struct sockaddr SA;
- 
+char *namelist[100]; //名称列表，存储当前聊天室中的名称
+
 void init()  //服务器端初始化函数
 {
 	sockfd = socket(AF_INET, SOCK_STREAM, 0); //创建socket套接字
@@ -37,6 +38,8 @@ void init()  //服务器端初始化函数
 		perror("listen error");
 		exit(-1);
 	}
+	for (int i = 0; i < 100; i++) //初始化聊天室昵称列表
+		namelist[i] = NULL;
 }
 
 void SendMsg2All(char *msg)  //消息发送函数，将msg发给所有客户端
@@ -52,7 +55,66 @@ void SendMsg2All(char *msg)  //消息发送函数，将msg发给所有客户端
 	}
 }
 
-void *server_thread(void *p) //服务器端线程函数，利用多线程转发消息
+int checkused(char *name) //名称检查函数，检查聊天室名称列表中是否有输入的名称
+{
+        int address, n = 0;
+        for (address = 0; address < 100; address++)
+        {
+                if (namelist[address] != NULL)
+                        if (strcmp(name, namelist[address]) == 0)
+                        {
+                                n = 1;
+                                break;
+                        }
+        }
+        return n;
+}
+
+void useradd(char *name) //名称添加函数，将输入名称添加入聊天室名称列表
+{
+        int address;
+        for (address = 0; address < 100; address++)
+                if (namelist[address] == NULL)
+                        break;
+        namelist[address] = (char*)malloc(sizeof(char) * (strlen(name) + 1));
+        strcpy(namelist[address], name);
+}
+
+void userdelete(char *name) //名称删除函数，将输入名称从聊天室名称列表中删除
+{
+        int address = 0;
+        for (address = 0; address < 100; address++)
+                if (namelist[address] != NULL)
+                        if (strcmp(namelist[address], name) == 0)
+                                break;
+        if (address < 100)
+	{
+		free(namelist[address]);
+        	namelist[address] = NULL;
+	}
+}
+
+void checkrecv(int fd, char *taget) //接受数据函数，在recv基础上，判断是否断连
+{
+	char buf[30] = {};
+	if (recv(fd, buf, sizeof(buf), 0) <= 0)
+	{
+		int i;
+		for (i = 0; i < size; i++)
+		{
+			if (fd == fds[i])
+			{
+				fds[i] = 0;
+				break;
+			}
+		}
+		printf("exit: fd = %d 退出\n", fd);
+		pthread_exit( &i);
+	}
+	strcpy(taget, buf);
+}
+
+void server_thread(void *p, char *name) //服务器端线程函数，利用多线程转发消息
 {
 	int fd = *(int *) p;
 	printf("pthread = %d 进入\n", fd);
@@ -71,12 +133,94 @@ void *server_thread(void *p) //服务器端线程函数，利用多线程转发�
 					break;
 				}
 			}
+			userdelete(name);
 			printf("exit: fd = %d 退出\n", fd);
 			pthread_exit( &i);
 		}
 		 SendMsg2All(buf);
-	} 
-}  
+	}
+}
+
+void *checkin(void *p) //服务端判断登入函数
+{
+        int fd = *(int *) p;
+        FILE *fl;
+        int i = 0, k = 1, n = -1;
+        char name[30] = {}, password[30] = {}, check[30] = {}, rep1[] = "yes", rep2[] = "no", rep3[] = "usd";
+        checkrecv(fd, name);
+	n = checkused(name); //判断名称是否存在于聊天室名称列表中
+	while (n != 0)
+	{
+		send(fd, rep3, strlen(rep3), 0);
+		checkrecv(fd, name);
+		n = checkused(name);
+	}
+        fl = fopen(name, "rd"); //用读的方式打开名称命名的文件
+        if (fl == NULL) //打开失败则该名称未注册，引导注册并进入聊天室
+        {
+                send(fd, rep2, strlen(rep1), 0);
+                fl = fopen(name, "wd"); //用写的方式创建名称命名的函数
+                checkrecv(fd, password);
+                fputs(password, fl); //写入收到的密码
+                fclose(fl);
+		useradd(name); //添加名称到名称列表
+                server_thread(p, name); //进入聊天室
+        }
+        else //打开成功则该名称已注册
+        {
+                send(fd, rep1, strlen(rep1), 0);
+		checkrecv(fd, password);
+		if (strcmp(password, "restart") == 0) //客户端发来restart，重启判定
+			checkin(p);
+                fgets(check, sizeof(password), fl); //从名称文件中读取密码
+		fclose(fl);
+                if (strcmp(password, check) == 0)
+                {
+                        send(fd, rep1, strlen(rep1), 0);
+                        k = 0;
+                }
+                else
+                {
+                        send(fd, rep2, strlen(rep2), 0);
+                        k = 1;
+                }
+                while (i < 2 && k != 0) //同步客户端的三次输入机会
+                {
+                        checkrecv(fd, password);
+                        if (strcmp(password, check) == 0)
+                        {
+                                send(fd, rep1, strlen(rep1), 0);
+                                k = 0;
+                        }
+                        else
+                        {
+                                send(fd, rep2, strlen(rep2), 0);
+                                k = 1;
+                        }
+                        i++;
+                }
+                if (i <2 || k == 0)
+		{
+			useradd(name);
+                        server_thread(p, name);
+		}
+                else //登入失败，断开链接
+                {
+                        int i;
+                        for (i = 0; i < size; i++)
+                        {
+                                if (fd == fds[i])
+                                {
+                                        fds[i] = 0;
+                                        break;
+                                }
+                        }
+                        printf("exit: fd = %d 退出\n", fd);
+                        pthread_exit( &i);
+                }
+
+        }
+}
 
 void service() //服务器工作函数
 {
@@ -98,8 +242,8 @@ void service() //服务器工作函数
 			{
 				fds[i] = connfd;  //fds数组存储connfd
 				printf("connfd = %d\n", connfd);
-				pthread_t tid;  //声明线程ID
-				pthread_create(&tid, 0, server_thread,&connfd); //创建线程
+				pthread_t tid;  //声明线程ID	
+                                pthread_create(&tid, 0, checkin,&connfd); //创建线程
 				break;
 			}
 			if (size == i) 
@@ -119,5 +263,3 @@ int main()
 	service();
 	return 0;
 }
-
-
