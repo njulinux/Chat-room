@@ -11,7 +11,7 @@ int sockfd;
 int fds[100];  //存储accept得到的套接字
 int size = 100;
 char *IP = "127.0.0.1"; //IP地址
-short PORT = 8000;     //端口号
+short PORT = 8282;     //端口号
 typedef struct sockaddr SA;
  
 void init()  //服务器端初始化函数
@@ -58,8 +58,9 @@ void *server_thread(void *p) //服务器端线程函数，利用多线程转发�
 	printf("pthread = %d 进入\n", fd);
 	while (1) 
 	{
-		char buf[100] = { };
-		if (recv(fd, buf, sizeof(buf), 0) <= 0)  //判断连接中止或发生错误
+		char buf[100] = {};
+                int message = recv(fd, buf, sizeof(buf), 0);
+		if ( message <= 0)  //判断连接中止或发生错误
 		{
 			int i;
 			for (i = 0; i < size; i++) 
