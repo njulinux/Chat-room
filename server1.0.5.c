@@ -7,6 +7,9 @@
 #include <sys/socket.h>
 #include <pthread.h>
 
+#define FILE_BLOCK_SIZE 512
+#define DEFARG(fd) ((#fd[0]) ? (fd+0): -1)
+
 int sockfd;
 int fds[100];  //存储accept得到的套接字
 int size = 100;
@@ -42,12 +45,12 @@ void init()  //服务器端初始化函数
 		namelist[i] = NULL;
 }
 
-void SendMsg2All(char *msg)  //消息发送函数，将msg发给所有客户端
+void SendMsg2All(char *msg, int fd)  //消息发送函数，将msg发给所有客户端
 {
 	int i;
 	for (i = 0; i < size; i++) 
 	{
-		if (fds[i] != 0) 
+		if (fds[i] != 0 && fds[i] != fd) 
 		{
 			printf("send to %d\n", fds[i]);
 			send(fds[i], msg, strlen(msg), 0);
@@ -114,6 +117,86 @@ void checkrecv(int fd, char *taget) //接受数据函数，在recv基础上，�
 	strcpy(taget, buf);
 }
 
+void Recvfile_fromclient(char *filename, int fd)
+{
+	if(filename == NULL)
+	{
+		error("No file recieved!\n");
+	}
+	printf("filename is: %s\n", filename);
+	char buffer[FILE_BLOCK_SIZE] = {};
+	FILE *fp = fopen(filename, "w");
+	if(fp == NULL)
+	{
+		printf("File %s can't be opened!\n", filename);
+	}
+	else
+	{
+		bzero(buffer, FILE_BLOCK_SIZE);
+		int fblock_sz = 0;
+		while(fblock_sz = recv(fd, buffer, sizeof(buffer), 0) > 0)
+		{
+			int length = strlen(buffer);
+			printf("the buffer length is: %d\n", length);
+			if(fblock_sz == 0)
+			{
+				break;
+			}
+			int write_sz = fwrite(buffer, sizeof(char), length, fp);
+			printf("the size if: %d\n", write_sz);
+			if(write_sz < fblock_sz)
+			{
+				error("File write failed!\n");
+			}
+				bzero(buffer, FILE_BLOCK_SIZE);
+			if(fblock_sz == 0 || fblock_sz != FILE_BLOCK_SIZE)
+			{
+				break;
+			}	
+			
+		}
+		if(fblock_sz < 0)
+		{
+			error("Recieved file error!\n");
+		}
+		printf("OK recieved from client!\n");
+		fclose(fp);
+	}
+}
+
+void Sendfile_toclients(char *filename, int fd)
+{
+	for (int i = 0; i < size; i++) 
+	{
+		if (fds[i] != 0 && fds[i] != fd) 
+		{
+			printf("send file: %s to %d\n", filename, fds[i]);
+			char buffer[FILE_BLOCK_SIZE];
+			FILE *fp = fopen(filename, "r");
+			if(fp == NULL)
+			{
+				printf("Error: File %s not found\n", filename);
+				exit(1);
+			}
+			bzero(buffer, FILE_BLOCK_SIZE);
+			int fblock_sz;
+			while((fblock_sz = fread(buffer, sizeof(char), FILE_BLOCK_SIZE, fp)) > 0)
+			{
+				int length = strlen(buffer);
+				if(send(fds[i], buffer, length, 0) < 0)
+				{
+					printf("Error: Failed to send the file %s\n", filename);
+					break;
+				} 
+				bzero(buffer, FILE_BLOCK_SIZE);
+			}	
+			printf("OK, File %s was sent successfully!\n", filename);
+			fclose(fp);
+		}
+	}
+
+}
+
 void server_thread(void *p, char *name) //服务器端线程函数，利用多线程转发消息
 {
 	int fd = *(int *) p;
@@ -136,7 +219,25 @@ void server_thread(void *p, char *name) //服务器端线程函数，利用多�
 			printf("exit: fd = %d 退出\n", fd);
 			pthread_exit( &i);
 		}
-		 SendMsg2All(buf);
+		char *cmd = "-s ";//判断有client发送文件
+		char *fpos = strstr(buf, cmd);
+		printf("the sever buffer is: %s\n",  buf);
+		if(fpos != NULL)
+		{
+			char filename[100];
+			fpos += 3;
+			for(int i=0;*fpos != '\0';++fpos, ++i)
+			{
+				filename[i] = *fpos;
+			}
+			Recvfile_fromclient(filename, fd);
+			SendMsg2All(buf, DEFARG(fd));
+			Sendfile_toclients(filename, fd);
+		}
+		else
+		{
+			SendMsg2All(buf, DEFARG());
+		}
 	} 
 }  
 

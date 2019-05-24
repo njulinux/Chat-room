@@ -7,11 +7,14 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
+#define FILE_BLOCK_SIZE 512
+
 int sockfd;
 char *IP = "127.0.0.1"; //IP地址
 short PORT = 8000;  //端口号
 typedef struct sockaddr SA;
 char name[30]; //存储昵称
+
 
 void init() //客户端初始化函数
 {
@@ -54,6 +57,78 @@ void enter(char *buf) //完善空格输入问题
 	buf[i - 1] = '\0';
 }
 
+void Sendfile_toserver(char *filename)//客户端传输文件给服务器
+{
+	char buffer[FILE_BLOCK_SIZE];
+	printf("sending %s to the ChatRoom\n", filename);
+	FILE *fp = fopen(filename, "r");
+	if(fp == NULL)
+	{
+		printf("Error: File %s not found\n", filename);
+		exit(1);
+	}
+	bzero(buffer, FILE_BLOCK_SIZE);
+	int fblock_sz;
+	while((fblock_sz = fread(buffer, sizeof(char), FILE_BLOCK_SIZE, fp)) > 0)
+	{
+		int length = strlen(buffer);
+		if(send(sockfd, buffer, length, 0) < 0)
+		{
+			printf("Error: Failed to send the file %s.\n", filename);
+			break;
+		} 
+		bzero(buffer, FILE_BLOCK_SIZE);
+	}	
+	printf("OK, File %s was sent successfully!\n", filename);
+	fclose(fp);
+}
+
+void Recvfile_fromserver(char *filename)//客户端从服务器接收文件
+{
+	char buffer[FILE_BLOCK_SIZE];
+	printf("the recieving filename is: %s\n", filename);
+	if(filename == NULL)
+	{
+		printf("The file isn't existed!\n");
+		exit(1);
+	}
+	FILE *fp = fopen(filename, "w+");
+	if(fp == NULL)
+	{
+		printf("File %s can't be opened!\n", filename);
+	}
+	else
+	{
+		bzero(buffer, FILE_BLOCK_SIZE);
+		int fblock_sz = 0;
+		while(fblock_sz = recv(sockfd, buffer, FILE_BLOCK_SIZE, 0) > 0)
+		{
+			int length = strlen(buffer);
+			printf("the buffer is: %s\n", buffer);
+			if(fblock_sz == 0)
+			{
+				break;
+			}
+			int write_sz = fwrite(buffer, sizeof(char), length, fp);
+			if(write_sz < length)
+			{
+				error("File write failed!\n");
+			}
+			bzero(buffer, FILE_BLOCK_SIZE);
+			if(fblock_sz == 0 || fblock_sz != FILE_BLOCK_SIZE)
+			{
+				break;
+			}
+		}
+		if(fblock_sz < 0)
+		{
+			error("Recieved file error!\n");
+		}
+		printf("OK recieved from server!\n");
+		fclose(fp);
+	}
+}
+
 void work() //客户端工作函数
 {
 	pthread_t id;
@@ -69,6 +144,7 @@ void work() //客户端工作函数
 		char msg[131] = { };
 		sprintf(msg, "%s:%s", name, buf);
 		send(sockfd, msg, strlen(msg), 0); //聊天信息发送至服务器端
+		printf("the sending message is: %s\n", msg);
 		if (strcmp(buf, "quit") == 0)   //输入quit以退出聊天室
 		{
 			memset(buf2, 0, sizeof(buf2));
@@ -76,6 +152,19 @@ void work() //客户端工作函数
 			send(sockfd, buf2, strlen(buf2), 0);
 			break;
 		}
+
+		if (buf[0] == '-' && buf[1] == 's')//-s: 传输文件，如：-s homework.txt
+		{
+			char filename[100] = {};
+			printf("the client buffer is: %s\n", buf);
+			for(int i=3;i<strlen(buf);++i)
+				{
+					filename[i-3] =buf[i];
+				}
+			printf("the sending filename is: %s. \n", filename);
+			Sendfile_toserver(filename);
+		}
+	
 	}
 	close(sockfd);
 }
@@ -90,7 +179,25 @@ void work() //客户端工作函数
 			printf("error!");
 			exit(-1);
 		}
-		printf("%s\n", buf);
+		
+		//接收到 "-s" 提示时，意味着要接收文件了
+		char *cmd = "-s ";
+		char *fpos = strstr(buf, cmd);
+		if(fpos != NULL)
+		{
+			char filename[100];
+			fpos += 3;
+			for(int i=0;*fpos != '\0';++fpos, ++i)
+			{
+				filename[i] = *fpos;
+			}
+			Recvfile_fromserver(filename);
+		}
+		
+		else
+		{
+			printf("%s\n", buf);
+		}
 	}
 }
 
